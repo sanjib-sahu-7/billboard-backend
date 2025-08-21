@@ -1,0 +1,10 @@
+Flask==3.0.3
+pymongo==4.8.0
+Werkzeug==3.0.4
+Pillow==10.4.0.84
+opencv-python==4.10.0.84
+numpy==2.1.1
+easyocr==1.7.1
+torch==2.4.1
+torchvision==0.19.1
+pytesseract==0.3.13
