@@ -8,3 +8,4 @@ easyocr==1.7.1
 torch==2.6.0
 torchvision==0.21.0
 pytesseract==0.3.13
+gunicorn
