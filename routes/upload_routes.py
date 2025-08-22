@@ -38,6 +38,8 @@ report_bp = Blueprint("report", __name__)
 @jwt_required()
 def upload_and_detect():
     current_user = get_jwt_identity()
+
+    # check file in request
     if "file" not in request.files:
         return jsonify({"error": "No file uploaded"}), 400
 
@@ -51,38 +53,58 @@ def upload_and_detect():
         return jsonify({"error": f"Failed to save file: {str(e)}"}), 500
 
     try:
-        # Convert to Base64
+        # encode image
         with open(filepath, "rb") as f:
             encoded_image = base64.b64encode(f.read()).decode("utf-8")
 
-        # Detect billboards
-        bboxes, confs = detect_billboards(filepath)
+        # detect billboards (defensive unpacking)
+        result = detect_billboards(filepath)
+        if isinstance(result, tuple):
+            if len(result) >= 2:
+                bboxes, confs = result[:2]
+            else:
+                bboxes, confs = result[0], []
+        else:
+            bboxes, confs = result, []
+
         img = cv2.imread(filepath) if bboxes else None
         violations = []
+        gps = None
 
         if bboxes:
             H, W = img.shape[:2]
             violations = apply_violation_rules(filepath, bboxes, confs, H, W)
 
+            # OCR check
             for v in violations:
-                extra = check_text_violation(filepath, (v["bbox"]["x"], v["bbox"]["y"], v["bbox"]["w"], v["bbox"]["h"]))
+                extra = check_text_violation(
+                    filepath,
+                    (v["bbox"]["x"], v["bbox"]["y"], v["bbox"]["w"], v["bbox"]["h"])
+                )
                 v["reasons"].extend(extra)
 
+            # GPS check
             gps = extract_exif_location(filepath)
             if gps and check_gps_violation(gps, ALLOWED_ZONES):
                 for v in violations:
                     v["reasons"].append("Unauthorized Location")
 
+            # draw results
             for v in violations:
                 x, y, w, h = v["bbox"]["x"], v["bbox"]["y"], v["bbox"]["w"], v["bbox"]["h"]
-                cv2.rectangle(img, (x, y), (x+w, y+h), (0,255,0), 3)
+                cv2.rectangle(img, (x, y), (x + w, y + h), (0, 255, 0), 3)
 
             result_path = os.path.join(RESULT_FOLDER, filename)
             cv2.imwrite(result_path, img)
         else:
-            violations = [{"bbox": None, "confidence": 0.0, "reasons": ["No billboard detected"]}]
+            violations = [{
+                "bbox": None,
+                "confidence": 0.0,
+                "reasons": ["No billboard detected"]
+            }]
             gps = extract_exif_location(filepath)
 
+        # check duplicates
         img_hash = generate_image_hash(filepath)
         if check_duplicate(img_hash, images_col):
             for v in violations:
@@ -101,6 +123,7 @@ def upload_and_detect():
             "uploaded_by": current_user
         }
 
+        # save in DB
         images_col.insert_one({
             "filename": filename,
             "image": encoded_image,
@@ -108,10 +131,13 @@ def upload_and_detect():
             "hash": img_hash,
             "uploaded_by": current_user
         })
+
         print("DEBUG OUTPUT:", output, flush=True)
         return jsonify([output])
+
     except Exception as e:
         return jsonify({"error": f"Internal processing error: {str(e)}"}), 500
+
 
 # ---------------- User Report ----------------
 @report_bp.route("/report", methods=["POST"])

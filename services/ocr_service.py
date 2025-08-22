@@ -2,6 +2,8 @@ import pytesseract
 import cv2
 from config import BANNED_KEYWORDS
 
+pytesseract.pytesseract.tesseract_cmd = "tesseract"
+
 def check_text_violation(image_path, bbox):
     """
     Extract text from the given ROI (bounding box) in the image
