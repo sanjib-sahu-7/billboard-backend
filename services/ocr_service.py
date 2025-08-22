@@ -19,8 +19,13 @@ def check_text_violation(image_path, bbox):
     if roi.size == 0:
         return ["Error: Empty ROI"]
 
-    # Run OCR (Render/Linux will use system-installed Tesseract)
-    text = pytesseract.image_to_string(roi)
+    # Preprocess for OCR
+    gray = cv2.cvtColor(roi, cv2.COLOR_BGR2GRAY)
+    _, thresh = cv2.threshold(gray, 150, 255, cv2.THRESH_BINARY)
+
+    # Run OCR
+    text = pytesseract.image_to_string(thresh).strip()
+    print(f"[OCR] Extracted text: {text}")  # Debugging log
 
     # Check for banned keywords
     reasons = []
@@ -29,6 +34,8 @@ def check_text_violation(image_path, bbox):
             reasons.append(f"Content Violation: {word}")
 
     return reasons
+
+
 
 # import pytesseract
 # from config import BANNED_KEYWORDS
