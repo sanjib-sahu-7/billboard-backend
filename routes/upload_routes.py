@@ -19,6 +19,8 @@ from pymongo import MongoClient
 from gridfs import GridFS
 from werkzeug.utils import secure_filename
 from datetime import datetime, timezone
+from flask import Response
+from bson.objectid import ObjectId
 
 # ---------------- Setup ----------------
 BASE_DIR = os.path.dirname(os.path.abspath(__file__))
@@ -212,3 +214,16 @@ def serve_upload(filename):
 @upload_bp.route('/results/<path:filename>')
 def serve_result(filename):
     return send_from_directory(RESULT_FOLDER, filename)
+
+@report_bp.route("/image/<file_id>", methods=["GET"])
+@jwt_required()
+def get_report_image(file_id):
+    try:
+        file_obj = fs.get(ObjectId(file_id))
+        return Response(
+            file_obj.read(),
+            mimetype=file_obj.content_type,
+            headers={"Content-Disposition": f"inline; filename={file_obj.filename}"}
+        )
+    except Exception:
+        return jsonify({"error": "Image not found"}), 404
