@@ -5,6 +5,7 @@ from flask_cors import CORS
 from routes.upload_routes import upload_bp, report_bp
 from routes.history_routes import history_bp
 from routes.user_routes import user_bp
+import logging
 
 app = Flask(__name__)
 CORS(app)
@@ -22,5 +23,10 @@ app.register_blueprint(user_bp, url_prefix="/user")
 def healthz():
     return {"status": "ok"}, 200
 
+@app.route("/ping")
+def ping():
+    return "pong"
+
 if __name__ == "__main__":
-    app.run(host="0.0.0.0", port=5000, debug=True)  # Consider removing debug=True for production
+    logging.basicConfig(level=logging.DEBUG)
+    app.run(host="0.0.0.0", port=5000)
