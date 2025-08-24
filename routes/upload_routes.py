@@ -12,6 +12,7 @@ from services.hash_service import generate_image_hash, check_duplicate
 from utils.exif_utils import extract_exif_location
 from services.gps_service import check_gps_violation
 from flask_jwt_extended import jwt_required, get_jwt_identity
+from flask import send_from_directory
 
 # ---------------- Setup ----------------
 BASE_DIR = os.path.dirname(os.path.abspath(__file__))
@@ -39,7 +40,6 @@ report_bp = Blueprint("report", __name__)
 def upload_and_detect():
     current_user = get_jwt_identity()
 
-    # check file in request
     if "file" not in request.files:
         return jsonify({"error": "No file uploaded"}), 400
 
@@ -57,15 +57,9 @@ def upload_and_detect():
         with open(filepath, "rb") as f:
             encoded_image = base64.b64encode(f.read()).decode("utf-8")
 
-        # detect billboards (defensive unpacking)
+        # detect billboards
         result = detect_billboards(filepath)
-        if isinstance(result, tuple):
-            if len(result) >= 2:
-                bboxes, confs = result[:2]
-            else:
-                bboxes, confs = result[0], []
-        else:
-            bboxes, confs = result, []
+        bboxes, confs = (result[:2] if isinstance(result, tuple) else (result, []))
 
         img = cv2.imread(filepath) if bboxes else None
         violations = []
@@ -75,15 +69,13 @@ def upload_and_detect():
             H, W = img.shape[:2]
             violations = apply_violation_rules(filepath, bboxes, confs, H, W)
 
-            # OCR check
+            # OCR + GPS + other rules
             for v in violations:
                 extra = check_text_violation(
-                    filepath,
-                    (v["bbox"]["x"], v["bbox"]["y"], v["bbox"]["w"], v["bbox"]["h"])
+                    filepath, (v["bbox"]["x"], v["bbox"]["y"], v["bbox"]["w"], v["bbox"]["h"])
                 )
                 v["reasons"].extend(extra)
 
-            # GPS check
             gps = extract_exif_location(filepath)
             if gps and check_gps_violation(gps, ALLOWED_ZONES):
                 for v in violations:
@@ -97,11 +89,7 @@ def upload_and_detect():
             result_path = os.path.join(RESULT_FOLDER, filename)
             cv2.imwrite(result_path, img)
         else:
-            violations = [{
-                "bbox": None,
-                "confidence": 0.0,
-                "reasons": ["No billboard detected"]
-            }]
+            violations = [{"confidence": 0.0, "reasons": ["No billboard detected"]}]
             gps = extract_exif_location(filepath)
 
         # check duplicates
@@ -110,13 +98,23 @@ def upload_and_detect():
             for v in violations:
                 v["reasons"].append("Expired Billboard")
 
+        # --- 🔹 Pick only the highest confidence violation ---
+        best_violation = max(
+            violations, key=lambda v: v.get("confidence", 0.0)
+        ) if violations else {"confidence": 0.0, "reasons": ["No billboard detected"]}
+
+        clean_violation = {
+            "confidence_percent": int(best_violation.get("confidence", 0.0) * 100),
+            "reasons": best_violation.get("reasons", [])
+        }
+
         output = {
             "filename": filename,
-            "violation": any(v["reasons"] for v in violations),
-            "violations": violations,
+            "violation": bool(clean_violation["reasons"]),
+            "violation_detail": clean_violation,  # ✅ only ONE violation returned
             "timestamp": datetime.now(timezone.utc).isoformat(),
-            "image_url": f"http://{request.host}/uploads/{filename}",
-            "result_url": f"http://{request.host}/results/{filename}",
+            "image_url": f"http://{request.host}/upload/uploads/{filename}",
+            "result_url": f"http://{request.host}/upload/results/{filename}",
             "latitude": gps['lat'] if gps else None,
             "longitude": gps['lon'] if gps else None,
             "hash": img_hash,
@@ -133,11 +131,10 @@ def upload_and_detect():
         })
 
         print("DEBUG OUTPUT:", output, flush=True)
-        return jsonify([output])
+        return jsonify(output)   # 🔹 return OBJECT with single violation
 
     except Exception as e:
         return jsonify({"error": f"Internal processing error: {str(e)}"}), 500
-
 
 # ---------------- User Report ----------------
 @report_bp.route("/report", methods=["POST"])
@@ -167,3 +164,12 @@ def get_heatmap_data():
         return jsonify({"reports": reports, "detections": detections})
     except Exception as e:
         return jsonify({"error": f"Failed to fetch heatmap data: {str(e)}"}), 500
+
+
+@upload_bp.route('/uploads/<path:filename>')
+def serve_upload(filename):
+    return send_from_directory(UPLOAD_FOLDER, filename)
+
+@upload_bp.route('/results/<path:filename>')
+def serve_result(filename):
+    return send_from_directory(RESULT_FOLDER, filename)
