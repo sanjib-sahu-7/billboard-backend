@@ -21,4 +21,5 @@ COPY . .
 EXPOSE 5000
 
 # Start app with gunicorn
-CMD ["gunicorn", "-b", "0.0.0.0:5000", "--timeout", "300", "app:app"]
+CMD ["gunicorn", "-b", "0.0.0.0:5000", "--timeout", "300", "--log-level", "debug", "app:app"]
+
