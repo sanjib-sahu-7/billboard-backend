@@ -34,7 +34,6 @@ ALLOWED_ZONES = [
 upload_bp = Blueprint("upload", __name__)
 report_bp = Blueprint("report", __name__)
 
-# ---------------- Upload & Detect ----------------
 @upload_bp.route("", methods=["POST"])
 @jwt_required()
 def upload_and_detect():
@@ -51,6 +50,22 @@ def upload_and_detect():
         file.save(filepath)
     except Exception as e:
         return jsonify({"error": f"Failed to save file: {str(e)}"}), 500
+
+    # Resize image to reduce memory load
+    try:
+        img = cv2.imread(filepath)
+        max_dim = 1024  # max width or height
+
+        if img is None:
+            return jsonify({"error": "Failed to read uploaded image"}), 400
+
+        height, width = img.shape[:2]
+        if max(height, width) > max_dim:
+            scale = max_dim / max(height, width)
+            resized_img = cv2.resize(img, (int(width * scale), int(height * scale)))
+            cv2.imwrite(filepath, resized_img)  # overwrite original file with resized
+    except Exception as e:
+        return jsonify({"error": f"Image resizing error: {str(e)}"}), 500
 
     try:
         # encode image
@@ -98,7 +113,7 @@ def upload_and_detect():
             for v in violations:
                 v["reasons"].append("Expired Billboard")
 
-        # --- 🔹 Pick only the highest confidence violation ---
+        # Pick only the highest confidence violation
         best_violation = max(
             violations, key=lambda v: v.get("confidence", 0.0)
         ) if violations else {"confidence": 0.0, "reasons": ["No billboard detected"]}
@@ -111,7 +126,7 @@ def upload_and_detect():
         output = {
             "filename": filename,
             "violation": bool(clean_violation["reasons"]),
-            "violation_detail": clean_violation,  # ✅ only ONE violation returned
+            "violation_detail": clean_violation,
             "timestamp": datetime.now(timezone.utc).isoformat(),
             "image_url": f"http://{request.host}/upload/uploads/{filename}",
             "result_url": f"http://{request.host}/upload/results/{filename}",
@@ -131,7 +146,7 @@ def upload_and_detect():
         })
 
         print("DEBUG OUTPUT:", output, flush=True)
-        return jsonify(output)   # 🔹 return OBJECT with single violation
+        return jsonify(output)
 
     except Exception as e:
         return jsonify({"error": f"Internal processing error: {str(e)}"}), 500
