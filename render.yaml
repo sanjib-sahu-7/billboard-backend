@@ -1,8 +1,23 @@
 services:
   - type: web
     name: billboard-ocr
-    env: python
-    buildCommand: |
-      apt-get update && apt-get install -y tesseract-ocr libtesseract-dev
-      pip install -r requirements.txt
-    startCommand: python app.py
+    env: docker
+    dockerfilePath: Dockerfile
+    healthCheckPath: /healthz
+    envVars:
+      - key: JWT_SECRET_KEY
+        value: your_real_jwt_secret_here
+      - key: MONGO_URI
+        value: your_real_mongo_uri_here
+      - key: DB_NAME
+        value: billboardDB
+      - key: COLLECTION_NAME
+        value: images
+      - key: MIN_AREA
+        value: "1000"
+      - key: CONFIDENCE_THRESHOLD
+        value: "0.45"
+      - key: BLUR_THRESHOLD
+        value: "50"
+      - key: BANNED_KEYWORDS
+        value: alcohol,tobacco,gambling,adult
