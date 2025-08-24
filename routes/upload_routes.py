@@ -13,6 +13,12 @@ from utils.exif_utils import extract_exif_location
 from services.gps_service import check_gps_violation
 from flask_jwt_extended import jwt_required, get_jwt_identity
 from flask import send_from_directory
+from flask import request, jsonify
+from flask_jwt_extended import jwt_required, get_jwt_identity
+from pymongo import MongoClient
+from gridfs import GridFS
+from werkzeug.utils import secure_filename
+from datetime import datetime, timezone
 
 # ---------------- Setup ----------------
 BASE_DIR = os.path.dirname(os.path.abspath(__file__))
@@ -25,6 +31,7 @@ client = MongoClient(MONGO_URI)
 db = client[DB_NAME]
 images_col = db[COLLECTION_NAME]
 reports_col = db["user_reports"]
+fs = GridFS(db) 
 
 ALLOWED_ZONES = [
     {"name":"Downtown","lat_min":20.30,"lat_max":20.40,"lon_min":85.80,"lon_max":85.85},
@@ -151,24 +158,41 @@ def upload_and_detect():
     except Exception as e:
         return jsonify({"error": f"Internal processing error: {str(e)}"}), 500
 
-# ---------------- User Report ----------------
+
 @report_bp.route("/report", methods=["POST"])
 @jwt_required()
-def report_unauthorized():
+def report_with_image():
     try:
         current_user = get_jwt_identity()
-        data = request.json
-        report = {
+        
+        file = request.files.get('image')
+        image_file_id = None
+
+        if file:
+            filename = secure_filename(file.filename)
+            # Save file to GridFS
+            image_file_id = fs.put(file, filename=filename, content_type=file.content_type)
+
+        description = request.form.get('description')
+        latitude = float(request.form.get('latitude'))
+        longitude = float(request.form.get('longitude'))
+
+        report_doc = {
             "reported_by": current_user,
-            "description": data.get("description"),
-            "latitude": data.get("latitude"),
-            "longitude": data.get("longitude"),
+            "description": description,
+            "latitude": latitude,
+            "longitude": longitude,
+            "image_file_id": image_file_id,  # store GridFS ObjectId reference
             "timestamp": datetime.now(timezone.utc).isoformat()
         }
-        reports_col.insert_one(report)
+
+        reports_col.insert_one(report_doc)
+
         return jsonify({"message": "Report submitted successfully"}), 201
+
     except Exception as e:
         return jsonify({"error": f"Failed to submit report: {str(e)}"}), 500
+
 
 # ---------------- Heatmap Data ----------------
 @report_bp.route("/heatmap", methods=["GET"])
