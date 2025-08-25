@@ -21,6 +21,10 @@ from werkzeug.utils import secure_filename
 from datetime import datetime, timezone
 from flask import Response
 from bson.objectid import ObjectId
+import json
+import os
+
+ZONES_FILE = "zones.json"
 
 # ---------------- Setup ----------------
 BASE_DIR = os.path.dirname(os.path.abspath(__file__))
@@ -227,3 +231,65 @@ def get_report_image(file_id):
         )
     except Exception:
         return jsonify({"error": "Image not found"}), 404
+
+
+
+
+def add_zone_from_report(lat, lon, default_size=0.003):
+    # Define new zone rectangle around the report point
+    new_zone = {
+        "name": "User Submitted Zone",
+        "lat_min": lat - default_size / 2,
+        "lat_max": lat + default_size / 2,
+        "lon_min": lon - default_size / 2,
+        "lon_max": lon + default_size / 2,
+        "allowed": False,
+        "color": "#FF4444",  # Red for violation by default
+        "description": "Zone added via report submission"
+    }
+    # Load existing zones or initialize empty
+    if os.path.exists(ZONES_FILE):
+        with open(ZONES_FILE, "r") as f:
+            zones = json.load(f)
+    else:
+        zones = []
+    # Optionally: Check for overlap, skip if already present
+    # Append new zone
+    zones.append(new_zone)
+    # Write back
+    with open(ZONES_FILE, "w") as f:
+        json.dump(zones, f)
+
+@report_bp.route("/report", methods=["POST"])
+@jwt_required()
+def report_with_image():
+    try:
+        current_user = get_jwt_identity()
+        file = request.files.get('image')
+        image_file_id = None
+        if file:
+            filename = secure_filename(file.filename)
+            image_file_id = fs.put(file, filename=filename, content_type=file.content_type)
+
+        description = request.form.get('description')
+        latitude = float(request.form.get('latitude'))
+        longitude = float(request.form.get('longitude'))
+
+        report_doc = {
+            "reported_by": current_user,
+            "description": description,
+            "latitude": latitude,
+            "longitude": longitude,
+            "image_file_id": image_file_id,
+            "timestamp": datetime.now(timezone.utc).isoformat()
+        }
+
+        reports_col.insert_one(report_doc)
+
+        # -----> Add the new location to zones file
+        add_zone_from_report(latitude, longitude)
+
+        return jsonify({"message": "Report submitted successfully"}), 201
+
+    except Exception as e:
+        return jsonify({"error": f"Failed to submit report: {str(e)}"}), 500
